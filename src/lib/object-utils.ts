@@ -3,23 +3,50 @@ type DeepPartial<T> = {
   [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P]
 }
 
-export const objectUtils = {
+interface ObjectUtils {
+  isObject(value: unknown): value is Record<string, unknown>
+  deepClone<T>(obj: T): T
+  deepMerge<T extends object>(target: T, ...sources: DeepPartial<T>[]): T
+  pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Pick<T, K>
+  omit<T extends object, K extends keyof T>(obj: T, keys: K[]): Omit<T, K>
+  flatten(obj: Record<string, any>, prefix?: string): Record<string, Primitive>
+  unflatten(obj: Record<string, any>): Record<string, any>
+  isEmpty(obj: Record<string, any>): boolean
+  hasCircularReference(obj: any, seen?: Set<any>): boolean
+  transform<T extends object, U>(
+    obj: T,
+    transformer: (value: any, key: string, object: T) => any
+  ): U
+  getValueByPath(obj: Record<string, any>, path: string): any
+  setValueByPath(obj: Record<string, any>, path: string, value: any): void
+  removeUndefined<T extends object>(obj: T): Partial<T>
+  isEqual(obj1: any, obj2: any): boolean
+  diff(obj1: Record<string, any>, obj2: Record<string, any>): Record<string, { old: any; new: any }>
+  toQueryString(obj: Record<string, any>): string
+  fromQueryString(queryString: string): Record<string, string>
+}
+
+export const objectUtils: ObjectUtils = {
   isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
   },
 
   deepClone<T>(obj: T): T {
-    if (!this.isObject(obj)) {
+    if (obj === null || typeof obj !== 'object') {
       return obj
     }
 
-    const clone: any = Array.isArray(obj) ? [] : {}
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.deepClone(item)) as unknown as T
+    }
 
-    Object.entries(obj).forEach(([key, value]) => {
-      clone[key] = this.deepClone(value)
-    })
-
-    return clone
+    return Object.entries(obj as Record<string, unknown>).reduce(
+      (acc, [key, value]) => ({
+        ...acc,
+        [key]: this.deepClone(value),
+      }),
+      {}
+    ) as T
   },
 
   deepMerge<T extends object>(target: T, ...sources: DeepPartial<T>[]): T {
@@ -28,11 +55,17 @@ export const objectUtils = {
 
     if (this.isObject(target) && this.isObject(source)) {
       Object.keys(source).forEach(key => {
-        if (this.isObject(source[key])) {
-          if (!target[key]) Object.assign(target, { [key]: {} })
-          this.deepMerge(target[key] as object, source[key] as object)
+        const sourceKey = key as keyof typeof source
+        if (this.isObject(source[sourceKey])) {
+          if (!target[sourceKey]) {
+            Object.assign(target, { [sourceKey]: {} })
+          }
+          this.deepMerge(
+            target[sourceKey] as object,
+            source[sourceKey] as object
+          )
         } else {
-          Object.assign(target, { [key]: source[key] })
+          Object.assign(target, { [sourceKey]: source[sourceKey] })
         }
       })
     }
@@ -96,7 +129,7 @@ export const objectUtils = {
     return Object.keys(obj).length === 0
   },
 
-  hasCircularReference(obj: any, seen = new Set()): boolean {
+  hasCircularReference(obj: any, seen: Set<any> = new Set()): boolean {
     if (!this.isObject(obj)) {
       return false
     }
@@ -115,7 +148,7 @@ export const objectUtils = {
     transformer: (value: any, key: string, object: T) => any
   ): U {
     return Object.entries(obj).reduce((acc, [key, value]) => {
-      acc[key] = transformer(value, key, obj)
+      ;(acc as any)[key] = transformer(value, key, obj)
       return acc
     }, {} as U)
   },
@@ -160,7 +193,7 @@ export const objectUtils = {
     return keys1.every(key => this.isEqual(obj1[key], obj2[key]))
   },
 
-  diff(obj1: Record<string, any>, obj2: Record<string, any>): Record<string, any> {
+  diff(obj1: Record<string, any>, obj2: Record<string, any>): Record<string, { old: any; new: any }> {
     return Object.entries(obj1).reduce((acc, [key, value]) => {
       if (obj2[key] !== value) {
         acc[key] = {
