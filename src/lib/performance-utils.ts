@@ -85,6 +85,8 @@ class PerformanceMonitor {
   }
 }
 
+type AnyFunction = (...args: any[]) => any
+
 export const performanceUtils = {
   createMonitor(options?: PerformanceOptions): PerformanceMonitor {
     return new PerformanceMonitor(options)
@@ -128,13 +130,10 @@ export const performanceUtils = {
   /**
    * Create a debounced version of a function
    */
-  debounce<T extends (...args: any[]) => any>(
-    fn: T,
-    delay: number
-  ): (...args: Parameters<T>) => void {
-    let timeoutId: NodeJS.Timeout
+  debounce<F extends AnyFunction>(fn: F, delay: number): (...args: Parameters<F>) => void {
+    let timeoutId: ReturnType<typeof setTimeout>
 
-    return (...args: Parameters<T>) => {
+    return (...args: Parameters<F>): void => {
       clearTimeout(timeoutId)
       timeoutId = setTimeout(() => fn(...args), delay)
     }
@@ -143,13 +142,10 @@ export const performanceUtils = {
   /**
    * Create a throttled version of a function
    */
-  throttle<T extends (...args: any[]) => any>(
-    fn: T,
-    limit: number
-  ): (...args: Parameters<T>) => void {
+  throttle<F extends AnyFunction>(fn: F, limit: number): (...args: Parameters<F>) => void {
     let inThrottle = false
 
-    return (...args: Parameters<T>) => {
+    return (...args: Parameters<F>): void => {
       if (!inThrottle) {
         fn(...args)
         inThrottle = true
@@ -161,23 +157,23 @@ export const performanceUtils = {
   /**
    * Create a memoized version of a function with performance tracking
    */
-  memoizeWithPerformance<T extends (...args: any[]) => any>(
-    fn: T,
+  memoizeWithPerformance<F extends AnyFunction>(
+    fn: F,
     options: PerformanceOptions & {
       maxCacheSize?: number
-      cacheKeyFn?: (...args: Parameters<T>) => string
+      cacheKeyFn?: (...args: Parameters<F>) => string
     } = {}
-  ): T {
-    const cache = new Map<string, ReturnType<T>>()
+  ): F {
+    const cache = new Map<string, ReturnType<F>>()
     const monitor = new PerformanceMonitor(options)
     const { maxCacheSize = 1000, cacheKeyFn = (...args) => JSON.stringify(args) } = options
 
-    return ((...args: Parameters<T>) => {
+    return ((...args: Parameters<F>): ReturnType<F> => {
       const key = cacheKeyFn(...args)
       monitor.start(fn.name)
 
       if (cache.has(key)) {
-        const result = cache.get(key)
+        const result = cache.get(key)!
         monitor.end(fn.name, { cached: true })
         return result
       }
@@ -190,7 +186,7 @@ export const performanceUtils = {
       cache.set(key, result)
       monitor.end(fn.name, { cached: false })
       return result
-    }) as T
+    }) as F
   },
 
   /**
@@ -203,7 +199,7 @@ export const performanceUtils = {
     const { maxSize = 100, maxDelay = 100 } = options
     let batch: T[] = []
     let pendingPromise: Promise<R[]> | null = null
-    let timeoutId: NodeJS.Timeout | null = null
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
 
     const processBatch = async (): Promise<R[]> => {
       const items = [...batch]
@@ -229,7 +225,7 @@ export const performanceUtils = {
         }
       }
 
-      const result = await pendingPromise
+      const result = await (pendingPromise || processBatch())
       const index = batch.indexOf(item)
       return result[index]
     }
